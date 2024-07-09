@@ -6,7 +6,11 @@ editor_options:
   markdown: 
     wrap: sentence
 output: 
-  pdf_document: default
+  html_document:
+    theme: cerulean
+    highlight: tango
+    toc: true
+    toc_depth: 2
 ---
 
 # Project Description
