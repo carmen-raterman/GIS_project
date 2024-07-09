@@ -1,5 +1,5 @@
 ---
-title: "DATA 532 Final Project"
+title: "Spatial Analysis of 1894 Cholera Outbreak in Soho"
 author: "Carmen Raterman"
 date: "`r Sys.Date()`"
 editor_options: 
