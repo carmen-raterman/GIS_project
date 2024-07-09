@@ -1,0 +1,367 @@
+---
+title: "DATA 532 Final Project"
+author: "Carmen Raterman"
+date: "`r Sys.Date()`"
+editor_options: 
+  markdown: 
+    wrap: sentence
+output: 
+  pdf_document: default
+---
+
+# Project Description
+
+## Library setup
+
+```{r, warning = F}
+# Read in libraries
+library(tidyverse) #to clean the data
+library(rio) #to read in excel, SAS, any other data
+library(sf) #to read in spatial data
+library(tmap) #to make our maps
+library(SpatialKDE) #for KDE analysis
+```
+
+## Data Wrangling
+
+#### Reading in the cholera case data from 1894 London and the Soho Neighborhood polygon boundaries
+
+```{r, warning  = F}
+# Set the directory where data files are located
+data.dir <- "lab_data/"
+
+# File names remain the same
+file_names <- c("Cholera_Deaths_period_0_MOR.shp",
+                "Cholera_Deaths_period_1_JC.shp",
+                "Cholera_Deaths_period_2_ECB.shp",
+                "Cholera_Deaths_period_3_LW.shp",
+                "Cholera_Deaths_period_4.shp")
+
+cholera_data_list <- list()
+
+# Create a list of 5 data frames for each period of disease outbreak
+for(i in 1:length(file_names)){
+  cholera_data_list[[i]] <- read_sf(file.path(data.dir, file_names[i]))
+}
+
+# Combine the data frames into one data frame
+cholera_data <- do.call("rbind", cholera_data_list)
+
+# Read in shape file of London-Soho neighborhood
+soho_boundaries <- read_sf(file.path(data.dir, "Soho__345782_Neighborhoods.shp"))
+
+# Read in shape file of London-Soho streets
+soho_streets <- read_sf(file.path(data.dir, "Soho_Streets.shp"))
+
+# Read in Soho census file in csv format
+soho_census <- rio::import(file.path(data.dir, "Soho_Neighborhood_Census_Data.xlsx"))
+
+# Merge soho census and soho boundary data
+soho_areas <- left_join(soho_boundaries, soho_census)
+
+# Display the head of the data frames
+head(cholera_data)
+head(soho_areas)
+head(soho_streets)
+
+```
+
+#### Data Description
+
+The variables contained in this data table are from 1894 cholera case data in London, England.
+The geographical units are shown in the British National Grid system.
+The `cholera_data` represents five periods of the outbreak, period 0, 1, 2, 3, and 4.
+This data is represented as individual points that show the geographical location of a reported case of cholera.
+The `soho_area` data combined census data from the Soho neighborhoods in London with the polygons representing the outlines of the Soho neighborhoods.
+The `soho_streets` data provides spatial information of the streets in the Soho neighborhoods shown as lines.
+
+#### Sub-setting cases to only include those during period 4
+
+```{r, comment = NA, warning  = F}
+# Filter to only period 4 cases
+cholera_data_period_4 <- cholera_data %>%
+  filter(Period == 4)
+```
+
+#### Creating a new logical variable that is called period4_indicator
+
+This variable equals 1 if in period 4 and 0 otherwise.
+
+```{r, warning  = F}
+# Create new variable period4_indicator =1 if in period 4 otherwise 0.
+cholera_data4 <- cholera_data %>%
+  mutate(period4_indicator = ifelse(Period == 4, 1 ,0))
+# ifelse(condition, value if true, value if false)
+# if the period is = 4 then set it to 1, otherwise set it to 0
+# expect 6 variables
+
+# Show the new variable
+head(cholera_data4)
+
+# Summarize number of cases per period.
+# we want to know the count of people that fall in each period of the epidemic
+summary_output <- cholera_data %>%
+  group_by(Period) %>%
+  summarize(count = n()) # n counts then number of people
+
+# Show summary
+summary_output
+
+```
+
+#### Using the `st\_join()` function to create a new data frame that contains the point data and the area data corresponding to those points
+
+```{r, warning  = F}
+
+spatial_join_data <- st_join(cholera_data, soho_boundaries) # if we had to create prevalence we would use soho_areas instead because of census numbers
+head(spatial_join_data)
+
+```
+
+#### Using layering in `tmap` to produce a preliminary plot of both a chloropleth (polygon) map of area attributes with points representing location data
+
+```{r, warning  = F}
+
+tm_shape(soho_areas) +
+  tm_polygons(col = "Population") +
+  tm_shape(cholera_data) +
+    tm_dots("purple") +
+      tm_shape(soho_streets) +
+        tm_lines("black")
+
+```
+
+#### Creating a plot of the cholera point case data, including the `st\_bbox()` function to get a bounding box
+
+```{r, warning  = F}
+
+tmap_mode("plot")
+# Get the bounding box
+box <- st_bbox(cholera_data)
+
+tm_shape(cholera_data) + 
+  tm_dots("purple")
+  
+```
+
+## Exploratory Analysis of Maps
+
+```         
+Based on the maps I created, I can observe spatial relationships between the populations of neighborhoods, their street boundaries, and the location of cases of cholera that were reported.
+In this map, I can see concentration of cases in certain areas, and a lot of these cases were occurring in center, denser populations of the Soho neighborhoods, rather than on the outskirts.The map in question 7 showing just the point data allows me to spatially determine where clusters are occurring, and I can reference this back to my Soho areas and streets data.
+```
+
+## Data Wrangling Part 2
+
+#### Creating a set of indices to subset
+
+Selecting 25 indices at random out of 126 indices.
+Then subset neighborhood polygons data to only include these indexed areas.
+
+```{r, q4-5}
+
+indices <- sample(seq(1, 126), size = 25, replace = F)
+
+# subset neighborhood polygons to only include indices
+soho_area_indices <- soho_areas[indices, ]
+
+# find the intersections between the points and the area subset
+cases_areas_subset <- st_intersection(cholera_data, soho_area_indices)
+
+```
+
+#### Plotting the subset point and area data using the $tmap$ functions
+
+Goal is to create a map that only includes areas and points for the selected (indexed) areas.
+
+```{r, q6}
+
+# plotting the subset point and area data with tmap
+tm_shape(soho_area_indices) +
+  tm_borders() +
+  tm_shape(cases_areas_subset) +
+  tm_dots(col = "blue", size = 0.2)
+
+```
+
+#### Creating a buffer of 10 meters surrounding each point and create a plot with the boundaries of the spatial polygons, the points, and the surrounding buffers
+
+```{r, q7}
+
+# FULL point and area data, make a buffer of 10m
+buffer_10 <- st_buffer(cholera_data, dist = 10)
+
+# now to plot (including boundaries of spatial polygons, point data, and buffers)
+tm_shape(soho_areas) +
+  tm_borders() +
+  tm_shape(cholera_data) +
+  tm_dots(col = "blue") +
+  tm_shape(buffer_10) +
+  tm_borders(col = "green")
+  
+```
+
+#### Calculating the number of cholera deaths that occur within each polygon using the `st\_contains()` function
+
+```{r, q8}
+
+# use st_contains() function to find # of deaths occur in soho areas
+deaths_contain <- st_contains(soho_areas, cholera_data)
+
+deaths_within_polygon <- lengths(deaths_contain)
+
+soho_area_death_count <- cbind(soho_areas, deaths_within_polygon)
+
+```
+
+#### Calculating the number of cholera deaths that occurred within a 10 meter buffer distance of the point data
+
+```{r, q9}
+
+intersect_buffer_point <- st_intersects(buffer_10, cholera_data)
+
+count_deaths <- lengths(intersect_buffer_point)
+
+# make a dataframe of above
+buffer_death_count <- cbind(cholera_data, count_deaths)
+
+# plot
+tm_shape(soho_areas)+
+  tm_borders(col="black")+
+  tm_shape(buffer_death_count)+
+  tm_dots(col = "count_deaths", size = "count_deaths", palette = "Reds", title = "Cholera Deaths") +
+  tm_layout(legend.outside = TRUE)
+
+```
+
+## Spatial Analysis
+
+#### Calculating the bandwidth of the point data
+
+```{r, bandwidth}
+# This gives a data frame of x,y coordinates from cholera point data
+coordinates <- data.frame(st_coordinates(cholera_data))
+
+# Calculate the number of observations (N)
+N <- dim(coordinates)[1]
+
+# Calculate the sd of x's
+s_x <- sd(coordinates$X)
+
+# The bandwidth can be the same for x and y for simplicity.
+bandwidth <- s_x * (2/(3 *N))^(1/6)
+bandwidth
+
+cat("Preferred Bandwidth:", bandwidth)
+
+```
+
+#### Creating a grid of equally spaced points to estimate the KDE (using a grid of 10)
+
+```{r, grid}
+# Creating grid of equally spaced rectangles so we can estimate probabilities
+
+# Inputs = sf point data frame and cell size (distance for equally spaced centers)
+grid <- create_grid_rectangular(soho_areas, cell_size = 10)
+
+```
+
+#### Calculating the Kernel Density Estimation (KDE) using the `KDE` function
+
+The inputs to the function are the point data, the bandwidth, and the grid.
+KDE can be useful if we want to assess if locations of points are related, allowing us to measure the likelihood of a point given the observed point patterns.
+In other words, the more observed data points in a sample that occur around a location, the higher the likelihood of an observation occurring at that location.
+
+```{r, kde-output}
+
+kde_output <- SpatialKDE::kde(points = cholera_data, band_width = bandwidth, grid = grid)
+
+```
+
+#### Finding min and max KDE values from the output
+
+```{r, kde-min-max}
+
+# finding min and max in kde_value column
+kde_min <- min(kde_output$kde_value)
+kde_max <- max(kde_output$kde_value)
+
+# now reporting values
+cat("Min KDE value:", kde_min)
+cat("Max KDE value:", kde_max)
+
+# The max kde value shows us the maximum density estimate from the grid, 17.7636, which can tell us areas with high reports of the cholera cases
+# The min kde value shows us the minimum density estimate value from the grid, 0, which shows us the areas with the lowest chance of a cholera case being reported
+```
+
+#### Plotting the KDE output in combination with point data using `tmap()`
+
+```{r, kde-plot}
+# plotting KDE with cholera point
+tm_shape(kde_output) +
+  tm_polygons(col = "kde_value") +
+  tm_shape(cholera_data) +
+  tm_dots(col = "blue", size = 0.1, alpha = 0.3)
+
+```
+
+#### KDE Map Explanation
+
+The higher KDE values in relation to the observed cholera point data are shown in the darker shades of orange in the map.
+We can see that the darker colors of orange from the KDE values are concentrated in the areas where there are clusters of cases of cholera from the point data.
+The lower KDE values are shown in the lighter yellow color, which shows us the areas with fewer to no cholera cases occurring there.
+We can see that the lighter shades of KDE values are further away from the clusters of cases mentioned earlier.
+This could mean that these areas are at lower risk of cholera.
+A big picture description about the process from the values is that this KDE map shows us areas that have high densities of cholera cases, indicating clusters and hotpots of the disease and how it might be spreading.
+
+#### Experimenting with the bandwidth of the KDE function to be (1) much smaller, and (2) much higher than the original bandwidth
+
+Then calculate KDEs for both the small/larger bandwidths and plot them together.
+
+```{r, bandwith-small-large}
+# original bandwidth is 41.35091
+
+# small bandwidth KDE (about half the og bandwidth)
+kde_smallbandwidth <- SpatialKDE::kde(points = cholera_data, band_width = 20, grid = grid)
+
+# plot small
+small_kde_plot <- tm_shape(kde_smallbandwidth) +
+  tm_polygons(col = "kde_value") +
+  tm_shape(cholera_data) +
+  tm_dots(col = "blue", size = 0.1, alpha = 0.3) +
+  tm_layout(title= 'Bandwidth 20')
+
+# larger bandwidth KDE
+kde_largebandwidth <- SpatialKDE::kde(points = cholera_data, band_width = 80, grid = grid)
+
+# plot larger
+large_kde_plot <- tm_shape(kde_largebandwidth) +
+  tm_polygons(col = "kde_value") +
+  tm_shape(cholera_data) +
+  tm_dots(col = "blue", size = 0.1, alpha = 0.3) +
+  tm_layout(title= 'Bandwidth 80')
+
+# plotting side by side for comparison
+tmap_arrange(small_kde_plot, large_kde_plot)
+
+```
+
+The bandwidth controls how smooth the estimated density curve is, with lower bandwidths resulting in spiky distributions and higher bandwidths resulting in flatter, smoother distributions; we can see this in our two maps above.
+On the right, with the larger bandwidth of 80, more of the points are included in the density curve, and it appears that the trend of the disease is more broad and shows less specific areas of concentration or significant clusters of cholera.
+With the smaller bandwidth of 20 on the left, the KDE map shows smaller, more local spikes of the disease, but it is more difficult to interpret clusters in the given area.
+
+## Recommendations
+
+Our KDE analysis has shown us the areas and neighborhoods in Soho that have a high density of cholera cases.
+This can assist us in our next steps because we have identified areas with higher KDE values and clusters of cases that we can direct our interventions towards to help manage the spread of disease, and also attempt to identify the cause of the outbreaks, given the geographical information we have analyzed in this report.
+To reduce the transmission of cholera, we recommend an educational intervention that emphasizes the importance of hand washing, clean water, and other hygiene practices.
+Furthermore, we recommend emergency clinics be implemented in these high KDE areas to help treat and control transmission in these existing clusters.
+
+Additionally, we recommend policy and infrastructure improvements to prevent cholera outbreaks in Soho in the future.
+Current water and sanitation practices in Soho should be checked and re-evaluated in order to identify any vulnerabilities in existing infrastructure.
+Our maps provide geospatial context for officials to be able to target their structural investigations in these high KDE areas and determine what improvements need to be made to water and sanitation systems.
+Furthermore, we propose the inclusion of policy makers in this process to ensure that those residing in these Soho areas have access to clean water and effective sanitation systems.
+
+Lastly, although we have focused much of our intervention on these specific clusters of cholera in high KDE areas, we will continue to monitor and perform analyses on the lower KDE areas as well.
+This surveillance allows us to monitor any potential rises in cases and where geographically they are occurring in relation to the high KDE areas.
+Monitoring the lower risk areas holds us accountable in determining if our preventative measures are effective, or if they need to be re-evaluated and restructured.
